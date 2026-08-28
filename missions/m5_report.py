@@ -46,26 +46,70 @@ def run(verbose: bool = True) -> dict:
     # --- sustainability snapshot ---
     median_tokens = 800
     wh = sustainability.wh_per_query(median_tokens)
+    cleanest_region = min(sustainability.REGION_CARBON, key=sustainability.REGION_CARBON.get)
+    cheapest_region = min(sustainability.REGION_PRICE_KWH, key=sustainability.REGION_PRICE_KWH.get)
     sust = {
         "wh_per_query": wh,
         "carbon_g": sustainability.carbon_g(wh, "us-east-1"),
-        "best_region": min(sustainability.REGION_CARBON, key=sustainability.REGION_CARBON.get),
+        "energy_cost_usd": sustainability.energy_cost_usd(wh, "us-east-1"),
+        "best_region": cleanest_region,
+        "cleanest_region": cleanest_region,
+        "cheapest_region": cheapest_region,
     }
 
-    md = report.build_report(baseline, optimized, levers, sustainability=sust)
+    unit_economics = {
+        "tokens_per_day": r2["total_tokens"],
+        "baseline_daily": r2["baseline_daily"],
+        "optimized_daily": r2["optimized_daily"],
+        "baseline_per_m": r2["baseline_per_m"],
+        "optimized_per_m": r2["optimized_per_m"],
+        "savings_pct": r2["savings_pct"],
+    }
+    extensions = {
+        "mbu_rightsizing": r1["memory_rightsizing"],
+        "reasoning": r2["reasoning_analysis"],
+    }
+    recommendations = [
+        f"Ưu tiên cascade + cache + batch cho inference; M2 giảm {r2['savings_pct']:.1f}% "
+        f"và tiết kiệm khoảng ${infer_savings:,.0f}/tháng.",
+        f"Dùng spot có checkpoint cho workload interruptible và reserved cho workload ổn định; "
+        f"scenario purchasing tiết kiệm khoảng ${purchasing_savings:,.0f}/tháng.",
+        f"Theo dõi MFU/MBU thay vì chỉ GPU-Util, tắt GPU idle và cân nhắc right-sizing MBU "
+        f"(${r1['memory_rightsizing']['monthly_savings']:,.0f}/tháng trong scenario riêng).",
+    ]
+
+    md = report.build_report(
+        baseline,
+        optimized,
+        levers,
+        sustainability=sust,
+        unit_economics=unit_economics,
+        extensions=extensions,
+        recommendations=recommendations,
+    )
     out_md = os.path.join(ROOT, "outputs", "report.md")
     os.makedirs(os.path.dirname(out_md), exist_ok=True)
-    with open(out_md, "w") as f:
+    with open(out_md, "w", encoding="utf-8") as f:
         f.write(md)
     png = report.savings_waterfall(levers, os.path.join(ROOT, "outputs", "savings.png"))
 
     if verbose:
+        try:
+            _sys.stdout.reconfigure(encoding="utf-8")
+        except (AttributeError, OSError):
+            pass
         print("== M5 Optimization Report ==")
         print(md)
         print(f"\nWritten: outputs/report.md" + (f" + outputs/savings.png" if png else " (matplotlib absent: PNG skipped)"))
 
-    return {"baseline_monthly": round(baseline), "optimized_monthly": round(optimized),
-            "levers": levers, "total_savings_pct": round(total_pct, 1)}
+    return {
+        "baseline_monthly": round(baseline),
+        "optimized_monthly": round(optimized),
+        "levers": levers,
+        "total_savings_pct": round(total_pct, 1),
+        "unit_economics": unit_economics,
+        "extensions": extensions,
+    }
 
 
 if __name__ == "__main__":
