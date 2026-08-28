@@ -22,6 +22,8 @@ Inference tạo ra unit economics tốt nhất, còn purchasing là khoản ti�
 
 GPU `gpu-h100-5` có 8 giờ idle/ngày. Với giá on-demand H100 $2.50/giờ, phần lãng phí là **$20/ngày**, tương đương **$600/tháng**. Vì vậy cần theo dõi MFU/MBU và lịch bật/tắt instance thay vì chỉ nhìn `nvidia-smi`.
 
+Nếu áp dụng policy right-size xuống một tier cho hai util-lie, `gpu-h100-4` có scenario savings khoảng **$511/tháng** (H100 → A100) và `gpu-a10g-1` khoảng **$144/tháng** (A10G → L4), tổng **$655/tháng**. Đây là tiềm năng cần benchmark lại, không phải khoản tiết kiệm đã ghi nhận chắc chắn; nó được tách riêng trong M5 để tránh double-count với MBU right-sizing.
+
 ## 3. Extension 2: MBU-aware right-sizing
 
 Mình dùng ngưỡng MBU `<= 0.40` cho nhóm inference cần xem xét, sau đó chỉ chấp nhận GPU thay thế có HBM không thấp hơn GPU hiện tại, bandwidth peak đủ đáp ứng bandwidth quan sát được và giá giờ thấp hơn.
@@ -59,5 +61,14 @@ Ba hành động ưu tiên:
 3. Đưa MFU/MBU, idle hours, reasoning token share và tag coverage vào dashboard FinOps; dùng chúng làm điều kiện trước khi right-size hoặc chargeback.
 
 Các artifact nộp bài gồm `outputs/report.md`, `outputs/savings.png`, `outputs/focus_export.csv` và file write-up này. Các số liệu trong report giữ headline M5 riêng với các scenario extension để tránh double-counting.
+
+## 7. Checklist trước khi nộp
+
+- [x] `python verify.py` → **11/11 checks passed**
+- [x] `pytest -q` → **20 passed** (**15 test gốc + 5 test extension**)
+- [x] `outputs/report.md` tồn tại và có baseline/optimized, breakdown lever, sustainability
+- [x] `outputs/savings.png` tồn tại
+- [x] `outputs/focus_export.csv` tồn tại, gồm 50 dòng FOCUS mẫu
+- [x] Đã thực hiện 5 extensions với kết quả đo lường cụ thể
 
 > Tất cả số liệu là snapshot synthetic tháng 6/2026. Cần re-baseline giá, interruption rate, compatibility và carbon intensity trước khi áp dụng production.
