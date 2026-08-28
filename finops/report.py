@@ -94,6 +94,94 @@ def build_report(baseline_usd: float, optimized_usd: float, levers: dict,
                 f"{reasoning.get('cap_wh_savings', 0):,.2f} Wh saved",
             ]
 
+        cache = extensions.get("cache")
+        if cache:
+            lines += [
+                "",
+                "## Extension 3 — KV-cache economics",
+                "",
+                f"- Cache policy enabled for {cache.get('enabled_groups', 0)}/"
+                f"{len(cache.get('groups', []))} observed prefix groups",
+                f"- Break-even: more than "
+                f"{1.0 / (1.0 - cache.get('read_discount', 0.10)):.2f} "
+                "repeat reads per prefix under the normalized write-cost assumption",
+                f"- Measured cache savings: ${cache.get('cache_savings_usd', 0):,.4f}/day",
+                "",
+                "| Route tier | Groups | Enabled | Avg repeat reads | Break-even reads | Cache savings/day |",
+                "|---|---:|---:|---:|---:|---:|",
+            ]
+            for row in cache.get("by_tier", []):
+                lines.append(
+                    f"| {row['route_tier']} | {row['groups']} | {row['enabled_groups']} | "
+                    f"{row['avg_repeat_reads']:.2f} | {row['break_even_repeat_reads']:.2f} | "
+                    f"${row['cache_savings_usd']:.4f} |"
+                )
+
+        advanced_purchasing = extensions.get("advanced_purchasing")
+        if advanced_purchasing:
+            lines += [
+                "",
+                "## Extension 1 — Advanced purchasing policy",
+                "",
+                "The advanced scenario adds GPU-specific interruption rates and selects "
+                "the reserved term from observed job duration.",
+                "",
+                "| Workload | GPU | Tier | Reserved term | Effective spot $/hr | Optimized/month |",
+                "|---|---|---|---|---:|---:|",
+            ]
+            for row in advanced_purchasing.get("recommendations", []):
+                effective_spot = (
+                    f"${row['effective_spot_hr']:.4f}"
+                    if row.get("effective_spot_hr") is not None else "n/a"
+                )
+                lines.append(
+                    f"| {row['job_id']} | {row['gpu_type']} | {row['tier']} | "
+                    f"{row.get('reserved_term', 'n/a')} | {effective_spot} | "
+                    f"${row['optimized']:,} |"
+                )
+            lines += [
+                f"\nLegacy savings: {extensions.get('legacy_purchasing_savings_pct', 0):.1f}%; "
+                f"advanced savings: {advanced_purchasing.get('savings_pct', 0):.1f}%; "
+                f"change: {extensions.get('advanced_purchasing_delta_pct', 0):+.1f} percentage points.",
+            ]
+
+        carbon = extensions.get("carbon_scheduling")
+        if carbon:
+            lines += [
+                "",
+                "## Extension 5 — Carbon-aware Scheduling",
+                "",
+                f"- Interruptible workload energy: {carbon.get('total_energy_kwh', 0):,.2f} kWh",
+                f"- Cleanest region: {carbon.get('cleanest_region', 'n/a')}; "
+                f"cheapest electricity: {carbon.get('cheapest_region', 'n/a')}; "
+                f"balanced score: {carbon.get('balanced_region', 'n/a')}",
+                f"- Moving interruptible jobs from {carbon.get('baseline_region', 'n/a')} "
+                f"to {carbon.get('cleanest_region', 'n/a')} saves "
+                f"{carbon.get('carbon_saved_g', 0):,.0f} gCO2e "
+                f"({carbon.get('carbon_saved_pct', 0):.1f}%) and changes electricity cost by "
+                f"${carbon.get('cost_delta_usd', 0):+,.2f}",
+                "",
+                "| Region | $/kWh | gCO2/kWh | Electricity cost | Carbon |",
+                "|---|---:|---:|---:|---:|",
+            ]
+            for row in carbon.get("regions", []):
+                lines.append(
+                    f"| {row['region']} | ${row['price_usd_per_kwh']:.3f} | "
+                    f"{row['carbon_g_per_kwh']:.0f} | ${row['electricity_cost_usd']:,.2f} | "
+                    f"{row['carbon_g']:,.0f} g |"
+                )
+            lines += [
+                "",
+                "| Interruptible job | GPU-hours | Baseline carbon | Clean carbon | Saved |",
+                "|---|---:|---:|---:|---:|",
+            ]
+            for row in carbon.get("interruptible_jobs", []):
+                lines.append(
+                    f"| {row['job_id']} | {row['gpu_hours']:,.0f} | "
+                    f"{row['baseline_carbon_g']:,.0f} g | {row['clean_carbon_g']:,.0f} g | "
+                    f"{row['carbon_saved_g']:,.0f} g |"
+                )
+
     if recommendations:
         lines += ["", "## Recommended actions", ""]
         lines.extend(f"{index}. {item}" for index, item in enumerate(recommendations, start=1))

@@ -52,6 +52,25 @@ def discount_stack(
     return cache_mult * batch_mult
 
 
+def cache_is_worth_it(
+    avg_cache_reads: float,
+    write_cost_per_m: float,
+    read_discount: float = 0.10,
+) -> bool:
+    """Return whether repeated cached reads recover the cache-write cost.
+
+    ``avg_cache_reads`` is the average number of *repeat* reads for one
+    cached prefix.  ``write_cost_per_m`` is expressed in full-price input-read
+    equivalents per million tokens because the helper intentionally has no
+    model-price argument.  Callers can normalize a dollar write charge by the
+    model's uncached input price before calling this function.
+    """
+    reads = max(0.0, float(avg_cache_reads))
+    write_cost = max(0.0, float(write_cost_per_m))
+    discount = max(0.0, min(1.0, float(read_discount)))
+    return reads * (1.0 - discount) > write_cost
+
+
 def break_even_utilization(discount_frac: float) -> float:
     """Utilization at which a commitment pays off ~= 1 - discount.
 
@@ -60,7 +79,57 @@ def break_even_utilization(discount_frac: float) -> float:
     return max(0.0, min(1.0, 1.0 - discount_frac))
 
 
-def recommend_tier(hours_per_day: float, interruptible: bool, reserved_discount: float = 0.45) -> str:
+GPU_INTERRUPTION_RATES = {
+    # Illustrative June-2026 rates for the lab's neocloud catalog.
+    "H100": 0.03,
+    "H200": 0.04,
+    "A100": 0.05,
+    "A10G": 0.08,
+    "L4": 0.10,
+    "B200": 0.06,
+    "MI300X": 0.05,
+}
+
+
+def reserved_term(
+    job_days: float | None,
+    reserved_1yr_hr: float | None = None,
+    reserved_3yr_hr: float | None = None,
+) -> str:
+    """Choose a reserved term from duration, then compare available rates."""
+    if job_days is None or float(job_days) < 365.0:
+        return "1yr"
+    if reserved_1yr_hr is not None and reserved_3yr_hr is not None:
+        return "3yr" if float(reserved_3yr_hr) <= float(reserved_1yr_hr) else "1yr"
+    return "3yr"
+
+
+def effective_spot_rate(
+    spot_hr: float,
+    interruption_rate: float,
+    ckpt_overhead_frac: float = 0.03,
+    rework_hours_per_interrupt: float = 0.5,
+) -> float:
+    """Expected spot $/GPU-hour after checkpoint overhead and rework."""
+    return max(0.0, float(spot_hr)) * (
+        1.0
+        + max(0.0, float(ckpt_overhead_frac))
+        + max(0.0, float(interruption_rate)) * max(0.0, float(rework_hours_per_interrupt))
+    )
+
+
+def recommend_tier(
+    hours_per_day: float,
+    interruptible: bool,
+    reserved_discount: float = 0.45,
+    gpu_type: str | None = None,
+    job_days: float | None = None,
+    on_demand_hr: float | None = None,
+    spot_hr: float | None = None,
+    reserved_1yr_hr: float | None = None,
+    reserved_3yr_hr: float | None = None,
+    interruption_rate: float | None = None,
+) -> str:
     """Pick a purchasing tier from a workload's duty cycle + interruptibility.
 
     DOCUMENTED simple policy (instructor extension point — swap in your own):
@@ -71,8 +140,26 @@ def recommend_tier(hours_per_day: float, interruptible: bool, reserved_discount:
     duty = max(0.0, hours_per_day) / 24.0
     be = break_even_utilization(reserved_discount)
     if interruptible and hours_per_day < 24:
-        return "spot"
+        # The old call shape has no prices, so retain its deterministic spot
+        # recommendation.  The advanced call shape rejects spot only when
+        # expected interruption/rework makes it more expensive than on-demand.
+        if spot_hr is None or on_demand_hr is None:
+            return "spot"
+        rate = (
+            GPU_INTERRUPTION_RATES.get(gpu_type, 0.05)
+            if interruption_rate is None
+            else max(0.0, float(interruption_rate))
+        )
+        if effective_spot_rate(spot_hr, rate) < float(on_demand_hr):
+            return "spot"
+        if duty < be:
+            return "on_demand"
     if duty >= be:
+        if on_demand_hr is not None:
+            term = reserved_term(job_days, reserved_1yr_hr, reserved_3yr_hr)
+            reserved_hr = reserved_3yr_hr if term == "3yr" else reserved_1yr_hr
+            if reserved_hr is not None and float(reserved_hr) >= float(on_demand_hr):
+                return "on_demand"
         return "reserved"
     return "on_demand"
 

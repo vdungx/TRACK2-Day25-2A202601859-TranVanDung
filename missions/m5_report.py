@@ -8,7 +8,7 @@ _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)
 import os
 from missions._common import num, catalog_by_type, ROOT
 from finops import report, sustainability
-from missions import m1_efficiency_audit, m2_inference_levers, m3_purchasing
+from missions import carbon_scheduling, m1_efficiency_audit, m2_inference_levers, m3_purchasing
 
 DAYS = 30
 # one tier down for over-provisioned ("util-lie") GPUs
@@ -19,6 +19,7 @@ def run(verbose: bool = True) -> dict:
     r1 = m1_efficiency_audit.run(verbose=False)
     r2 = m2_inference_levers.run(verbose=False)
     r3 = m3_purchasing.run(verbose=False)
+    r5_carbon = carbon_scheduling.run(verbose=False)
     cat = catalog_by_type()
 
     # --- buckets ---
@@ -68,6 +69,11 @@ def run(verbose: bool = True) -> dict:
     extensions = {
         "mbu_rightsizing": r1["memory_rightsizing"],
         "reasoning": r2["reasoning_analysis"],
+        "cache": r2["cache_analysis"],
+        "advanced_purchasing": r3["advanced"],
+        "legacy_purchasing_savings_pct": r3["savings_pct"],
+        "advanced_purchasing_delta_pct": r3["advanced_savings_delta_pct"],
+        "carbon_scheduling": r5_carbon,
     }
     recommendations = [
         f"Ưu tiên cascade + cache + batch cho inference; M2 giảm {r2['savings_pct']:.1f}% "
@@ -76,6 +82,12 @@ def run(verbose: bool = True) -> dict:
         f"scenario purchasing tiết kiệm khoảng ${purchasing_savings:,.0f}/tháng.",
         f"Theo dõi MFU/MBU thay vì chỉ GPU-Util, tắt GPU idle và cân nhắc right-sizing MBU "
         f"(${r1['memory_rightsizing']['monthly_savings']:,.0f}/tháng trong scenario riêng).",
+        f"Bật cache theo prefix khi vượt break-even reads; M2 đo được "
+        f"${r2['cache_analysis']['cache_savings_usd']:.2f}/ngày cache savings.",
+        f"Chuyển job interruptible sang {r5_carbon['cleanest_region']} có thể giảm "
+        f"{r5_carbon['carbon_saved_pct']:.1f}% carbon; cân nhắc trade-off chi phí và latency.",
+        f"Advanced purchasing thay đổi savings {r3['advanced_savings_delta_pct']:+.1f} điểm %, "
+        "nên dùng duration và interruption rate thực tế trước khi commit.",
     ]
 
     md = report.build_report(
